@@ -1,0 +1,214 @@
+CREATE TABLE V0_LesSportifsEQ
+(
+  numSp NUMBER(4),
+  nomSp VARCHAR2(20),
+  prenomSp VARCHAR2(20),
+  pays VARCHAR2(20),
+  categorieSp VARCHAR2(10),
+  dateNaisSp DATE,
+  numEq NUMBER(4),
+  CONSTRAINT SP_CK1 CHECK(numSp > 0),
+  CONSTRAINT SP_CK2 CHECK(categorieSp IN ('feminin','masculin')),
+  CONSTRAINT SP_CK3 CHECK(numEq > 0)
+);
+
+CREATE TABLE V0_LesEpreuves
+(
+  numEp NUMBER(3),
+  nomEp VARCHAR2(20),
+  formeEp VARCHAR2(13),
+  nomDi VARCHAR2(25),
+  categorieEp VARCHAR2(10),
+  nbSportifsEp NUMBER(2),
+  dateEp DATE,
+  CONSTRAINT EP_PK PRIMARY KEY (numEp),
+  CONSTRAINT EP_CK1 CHECK (formeEp IN ('individuelle','par equipe','par couple')),
+  CONSTRAINT EP_CK2 CHECK (categorieEp IN ('feminin','masculin','mixte')),
+  CONSTRAINT EP_CK3 CHECK (numEp > 0),
+  CONSTRAINT EP_CK4 CHECK (nbSportifsEp > 0)
+);
+
+/*pas de table discipline on a prefere l'integrer dans les epreuves et caser la normalisation*/
+Create Table LesEpreuves
+(
+  numEp NUMBER(5),
+  nomEp VARCHAR2(20),
+  nomDi VARCHAR2(25),
+  formeEp VARCHAR2(13),
+  categorieEp VARCHAR2(10),
+  nbSportifsEp NUMBER(2),
+  dateEp DATE,
+  CONSTRAINT EP_PK PRIMARY KEY (numEp),
+  CONSTRAINT EP_CK1 CHECK (formeEp IN ('individuelle','par equipe','par couple')),
+  CONSTRAINT EP_CK2 CHECK (categorieEp IN ('feminin','masculin','mixte')),
+  CONSTRAINT EP_CK3 CHECK (nbSportifsEp > 0),
+  CONSTRAINT EP_CK4 CHECK (numEp > 0)
+);
+/*nbSportifsEp doit être respecté sauf exceptions*/ /*mais esk on parle que du sportif ou bien meme les equipes avec*/
+Create Table LesSportifs
+(
+  numSp NUMBER(4),
+  nomSp VARCHAR2(20),
+  prenomSp VARCHAR2(20),
+  paysSp VARCHAR2(20),
+  categorieSp VARCHAR2(10),
+  dateNaisSp DATE,
+  CONSTRAINT SP_CK1 CHECK(numSp between 1000 and 1500),
+  CONSTRAINT SP_CK2 CHECK(categorieSp IN ('feminin','masculin')),
+  CONSTRAINT SP_CK3 UNIQUE(nomSp, prenomSp)
+);
+
+Create Table LesEquipes
+(
+ numEq NUMBER(4) PRIMARY KEY,
+ paysEq VARCHAR2(20),
+ CONSTRAINT EQ_ck1 CHECK(numEq between 1 and 100)
+
+);
+
+Create Table EquipeSportif
+(
+  numSp NUMBER(4),
+  numEq NUMBER(4),
+  CONSTRAINT ES_PK PRIMARY KEY (numSp, numEq),
+  CONSTRAINT ES_FK1 FOREIGN KEY (numSp) REFERENCES LesSportifs(numSp),
+  CONSTRAINT ES_FK2 FOREIGN KEY (numEq) REFERENCES LesEquipes(numEq)
+);
+
+CREATE TRIGGER Verif_Pays_Equipe_Sportif
+BEFORE INSERT ON EquipeSportif
+FOR EACH ROW
+WHEN (
+      (SELECT paysEq FROM LesEquipes WHERE numEq = NEW.numEq)
+      <>
+      (SELECT paysSp FROM LesSportifs WHERE numSp = NEW.numSp)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Le pays du sportif doit être le même que celui de l''équipe');
+END;
+
+
+
+
+
+
+
+/*trigger pour verif que le sportif appartenent a une equipe a le meme pays que l'equipe*/
+/*trigger pour verifier que le nombre de sportif par equipe est au moins 2 ou plus seulement avec une requete c'est mieux*/
+/*DELETE FROM EquipeSportif
+WHERE numEq IN (
+    SELECT numEq
+    FROM EquipeSportif
+    GROUP BY numEq
+    HAVING COUNT(*) < 2
+);*/
+Create Table Inscrits(
+  numEp NUMBER(5),
+  participant NUMBER(4),
+  CONSTRAINT I_PK PRIMARY KEY (numEp, participant),
+  CONSTRAINT I_FK1 FOREIGN KEY (numEp) REFERENCES LesEpreuves(numEp)
+ /* particpant peut etre un sportif ou une equipe */
+
+);
+
+/*trigger aussi pour verif que si fome ep indiv alors particpant doit etre un sportif et si par equipe alors une equipe meme chose pour categorie*/
+CREATE TRIGGER verif_participant
+BEFORE INSERT ON Inscrits
+FOR EACH ROW
+WHEN NOT (
+     (NEW.participant BETWEEN 1000 AND 1500
+      AND EXISTS (SELECT 1 FROM LesSportifs WHERE numSp = NEW.participant))
+  OR (NEW.participant BETWEEN 1 AND 100
+      AND EXISTS (SELECT 1 FROM LesEquipes WHERE numEq = NEW.participant))
+)
+BEGIN
+    SELECT RAISE(ABORT, 'participant doit être un sportif ou une équipe');
+END;
+
+
+
+
+
+
+Create Table LesResultats
+(
+  numEp NUMBER(5),
+  podium NUMBER(4),
+  typeMedaille VARCHAR2(10) CHECK (typeMedaille IN ('or','argent','bronze')),
+  CONSTRAINT R_PK PRIMARY KEY (numEp, podium),
+  CONSTRAINT R_FK1 FOREIGN KEY (numEp, podium) REFERENCES Inscrits(numEp, participant)
+);
+
+
+CREATE TRIGGER verif_nb_medaille
+BEFORE INSERT ON LesResultats
+FOR EACH ROW
+WHEN EXISTS (
+    SELECT 1
+    FROM LesResultats
+    WHERE numEp = NEW.numEp
+      AND typeMedaille = NEW.typeMedaille
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Une seule médaille de chaque type par épreuve');
+END;
+
+
+
+
+ triggers = [
+            """
+            CREATE TRIGGER Verif_Pays_Equipe_Sportif
+            BEFORE INSERT ON EquipeSportif
+            FOR EACH ROW
+            BEGIN
+            SELECT
+                CASE
+                WHEN (SELECT paysEq FROM LesEquipes WHERE numEq = NEW.numEq)
+                    <> (SELECT paysSp FROM LesSportifs WHERE numSp = NEW.numSp)
+                THEN RAISE(ABORT, 'Le pays du sportif doit être le même que celui de l''équipe')
+                END;
+            END;
+            """,
+            """
+            CREATE TRIGGER verif_nb_medaille
+            BEFORE INSERT ON LesResultats
+            FOR EACH ROW
+            WHEN EXISTS (
+                SELECT 1
+                FROM LesResultats
+                WHERE numEp = NEW.numEp
+                AND typeMedaille = NEW.typeMedaille
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'Une seule médaille de chaque type par épreuve');
+            END;
+            """,
+            """
+            CREATE TRIGGER verif_participant
+            BEFORE INSERT ON Inscrits
+            FOR EACH ROW
+            WHEN NOT (
+                (NEW.participant BETWEEN 1000 AND 1500
+                AND EXISTS (SELECT 1 FROM LesSportifs WHERE numSp = NEW.participant))
+            OR (NEW.participant BETWEEN 1 AND 100
+                AND EXISTS (SELECT 1 FROM LesEquipes WHERE numEq = NEW.participant))
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'participant doit être un sportif ou une équipe');
+            END;
+            """
+        ]
+
+        for trig in triggers:
+            data.execute(trig)
+
+
+DROP TABLE IF EXISTS LesResultats;
+DROP TABLE IF EXISTS Inscrits;
+DROP TABLE IF EXISTS EquipeSportif;
+
+DROP TABLE IF EXISTS LesEpreuves;
+DROP TABLE IF EXISTS Discipline;
+DROP TABLE IF EXISTS LesEquipes;
+DROP TABLE IF EXISTS LesSportifs;
